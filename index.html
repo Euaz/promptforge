@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PromptForge — Build better AI prompts</title>
+<meta name="description" content="A guided builder that turns a few answers into a properly structured AI prompt. Free, no sign-up required.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚒</text></svg>">
+<link rel="stylesheet" href="styles.css?v=8">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="#/">
+    <span class="brand-mark">⚒</span>
+    <span class="brand-name">PromptForge</span>
+  </a>
+  <nav class="topnav">
+    <a href="#/" data-nav="gallery">Templates</a>
+    <a href="#/inspire" data-nav="inspire">Idea Generator</a>
+    <a href="#/library" data-nav="library">My Library <span class="pill" id="libCount">0</span></a>
+  </nav>
+  <div class="topbar-actions">
+    <button class="btn btn-ghost" id="surpriseBtn" title="Fill a random template with a worked example">🎲 Surprise me</button>
+    <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">◐</button>
+    <button class="btn btn-ghost" id="accountBtn">Sign in</button>
+  </div>
+</header>
+
+<main id="view"></main>
+
+<!-- ---------- Gallery ---------- -->
+<template id="tpl-gallery">
+  <section class="hero hero-centre">
+    <h1>Turn a rough idea into a proper prompt.</h1>
+    <p class="hero-sub">Type what you want the AI to do, in your own words. PromptForge works out what is missing, asks a couple of quick questions, and hands back a properly structured prompt.</p>
+
+    <form class="promptbar" id="promptBar">
+      <textarea id="promptInput" rows="3" placeholder="e.g. write a marketing email for my coffee subscription business" aria-label="Describe what you want the AI to do"></textarea>
+      <div class="promptbar-foot">
+        <span class="muted promptbar-hint">Press <kbd>Enter</kbd> to improve it · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line</span>
+        <button class="btn" type="submit" id="improveBtn">Improve my prompt →</button>
+      </div>
+    </form>
+
+    <div class="hero-cta">
+      <span class="muted">Not sure what to type?</span>
+      <button class="btn btn-ghost btn-sm" id="heroSurprise">🎲 Show me an example</button>
+      <a class="btn btn-ghost btn-sm" href="#/inspire">Give me an idea</a>
+    </div>
+
+    <div class="hero-meta">
+      <span>✓ No sign-up needed</span>
+      <span>✓ Works with Claude, ChatGPT, Gemini</span>
+      <span>✓ Your data stays in your browser</span>
+    </div>
+
+    <a class="scroll-cue" href="#templates">or start from a template ↓</a>
+  </section>
+
+  <div class="section-head" id="templates">
+    <h2>Start from a template</h2>
+    <p class="muted">Sixteen guided templates, each with the fields that matter for that job.</p>
+  </div>
+
+  <div class="gallery-controls">
+    <input type="search" id="tplSearch" class="search" placeholder="Search templates…" aria-label="Search templates">
+    <div class="chips" id="catChips"></div>
+  </div>
+
+  <div class="grid" id="tplGrid"></div>
+</template>
+
+<!-- ---------- Builder ---------- -->
+<template id="tpl-builder">
+  <div class="builder">
+    <div class="pane pane-form">
+      <div class="pane-head">
+        <a href="#/" class="back">← All templates</a>
+        <h2 id="bTitle"></h2>
+        <p class="muted" id="bBlurb"></p>
+        <div class="pane-head-actions">
+          <button class="btn btn-ghost btn-sm" id="rerollBtn" title="Fill this form with an example scenario">🎲 Try an example</button>
+          <button class="btn btn-ghost btn-sm" id="clearBtn" title="Empty every field">Clear form</button>
+          <span class="example-note" id="exampleNote" hidden></span>
+        </div>
+      </div>
+
+      <form id="bForm" autocomplete="off"></form>
+
+      <details class="advanced" id="advanced">
+        <summary>Advanced options</summary>
+        <div class="adv-body">
+          <label class="field">
+            <span class="label">Override the AI's role</span>
+            <input type="text" id="optRole" placeholder="e.g. a sceptical editor who cuts anything unnecessary">
+          </label>
+
+          <label class="field">
+            <span class="label">Example of what good looks like</span>
+            <textarea id="optExamples" rows="3" placeholder="Paste one example output. This is the single most effective thing you can add."></textarea>
+          </label>
+
+          <label class="field">
+            <span class="label">Force an output structure</span>
+            <select id="optStructure">
+              <option value="none">Leave it to the template</option>
+              <option value="markdown">Markdown with headings</option>
+              <option value="bullets">Bulleted list only</option>
+              <option value="table">Markdown table</option>
+              <option value="json">Valid JSON only</option>
+              <option value="plain">Plain prose, no formatting</option>
+            </select>
+          </label>
+
+          <div class="switches">
+            <label class="switch"><input type="checkbox" id="optReasoning" checked><span></span><em>Think step by step before answering</em></label>
+            <label class="switch"><input type="checkbox" id="optNoHallucinate" checked><span></span><em>Never invent facts or statistics</em></label>
+            <label class="switch"><input type="checkbox" id="optNoFluff"><span></span><em>No preamble or sign-off</em></label>
+            <label class="switch"><input type="checkbox" id="optAskFirst"><span></span><em>Ask clarifying questions first</em></label>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <div class="pane pane-out">
+      <div class="out-head">
+        <div class="tabs" id="fmtTabs">
+          <button data-fmt="xml" class="active">Claude <small>XML</small></button>
+          <button data-fmt="markdown">ChatGPT <small>Markdown</small></button>
+          <button data-fmt="plain">Plain</button>
+        </div>
+        <div class="out-actions">
+          <button class="btn btn-ghost" id="copyBtn">Copy</button>
+          <button class="btn" id="saveBtn">Save</button>
+        </div>
+      </div>
+
+      <div class="score" id="score"></div>
+
+      <pre class="output" id="output"></pre>
+
+      <div class="out-foot">
+        <span class="muted" id="charCount"></span>
+        <div class="out-links">
+          <button class="btn btn-ghost btn-sm" id="dlBtn">Download .md</button>
+          <a class="btn btn-ghost btn-sm" id="claudeLink" target="_blank" rel="noopener">Open in Claude ↗</a>
+          <a class="btn btn-ghost btn-sm" id="gptLink" target="_blank" rel="noopener">Open in ChatGPT ↗</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- ---------- Library ---------- -->
+<template id="tpl-library">
+  <section class="lib">
+    <div class="lib-head">
+      <h1>My Library</h1>
+      <div class="lib-tools">
+        <input type="search" id="libSearch" class="search" placeholder="Search saved prompts…" aria-label="Search saved prompts">
+        <button class="btn btn-ghost" id="exportBtn">Export all</button>
+      </div>
+    </div>
+    <div id="libSync" class="sync-note"></div>
+    <div id="libList"></div>
+  </section>
+</template>
+
+<!-- ---------- Improver (chat) ---------- -->
+<template id="tpl-improve">
+  <section class="improve">
+    <a href="#/" class="back">← Start over</a>
+    <div class="chat" id="chat"></div>
+    <div class="chat-input" id="chatInput"></div>
+  </section>
+</template>
+
+<!-- ---------- Idea generator ---------- -->
+<template id="tpl-inspire">
+  <section class="inspire">
+    <div class="inspire-head">
+      <h1>Idea Generator</h1>
+      <p>Stuck for something to make? Roll for a starting point, then turn any of them into a full prompt in one click.</p>
+    </div>
+
+    <div class="gallery-controls">
+      <div class="chips" id="seedChips"></div>
+      <button class="btn" id="rollBtn">🎲 New ideas</button>
+    </div>
+
+    <div id="seedList"></div>
+  </section>
+</template>
+
+<!-- ---------- Modals ---------- -->
+<div class="modal-backdrop" id="modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <button class="modal-close" id="modalClose" aria-label="Close">×</button>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<!-- The Supabase SDK loads dynamically from store.js, not as a tag here — a
+     blocked or slow CDN must never be able to stop these from running.
+     Bump ?v= after editing any of these to force browsers past a cached copy. -->
+<script src="js/config.js?v=1"></script>
+<script src="js/templates.js?v=4"></script>
+<script src="js/examples.js?v=3"></script>
+<script src="js/seeds.js?v=3"></script>
+<script src="js/builder.js?v=3"></script>
+<script src="js/improve.js?v=7"></script>
+<script src="js/store.js?v=2"></script>
+<script src="js/app.js?v=10"></script>
+</body>
+</html>
