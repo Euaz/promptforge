@@ -252,42 +252,49 @@ PF.classify = function (text) {
 
 /* ---------- questions ---------- */
 
-/* Generic and template-agnostic. The improver's job is to sharpen what the
-   user wrote, so it asks about universal gaps rather than template fields.
-   Anyone wanting the full field set can open the builder from the result. */
-var QUESTIONS = [
-  {
-    key: 'instruction',
-    label: 'What do you actually want the AI to do with this?',
-    why: 'Your prompt describes the situation but never makes a request, so the model has to guess. This is the single biggest thing holding it back.',
-    chips: ['Review it and flag problems', 'Give me step-by-step instructions', 'Compare it against alternatives', 'Answer my questions about it'],
-    placeholder: 'e.g. review this plan and tell me what I have missed',
-    askIf: function (session) { return !session.clean.hasInstruction; }
-  },
-  {
-    key: 'audience',
-    label: 'Who is the answer for?',
-    why: 'Audience changes vocabulary and depth more than any other single detail.',
-    chips: ['Just me', 'A complete beginner', 'My team', 'Customers', 'Technical experts'],
-    placeholder: 'e.g. someone with no technical background'
-  },
-  {
-    key: 'format',
-    label: 'How should the answer be laid out?',
-    why: 'Specify the shape or you get whatever the model feels like producing.',
-    chips: ['A short summary', 'Numbered steps', 'A comparison table', 'Bullet points', 'Detailed prose'],
-    placeholder: 'e.g. a table, then a one-line recommendation'
-  },
-  {
-    key: 'avoid',
-    label: 'Anything it should avoid?',
-    why: 'Negative constraints are one of the highest-leverage things you can add.',
-    chips: ['No jargon', 'No filler or preamble', 'Do not invent facts', 'Keep it short'],
-    placeholder: 'e.g. no marketing speak, do not suggest paid tools'
-  }
-];
+/* The one universal question: is there actually a request here? Everything
+   else asked interactively comes straight from whichever pack's `askFor`
+   matches the prompt (see below), so the questions are about the prompt's
+   actual subject instead of a fixed generic set. */
+var INSTRUCTION_QUESTION = {
+  key: 'instruction',
+  label: 'What do you actually want the AI to do with this?',
+  why: 'Your prompt describes the situation but never makes a request, so the model has to guess. This is the single biggest thing holding it back.',
+  chips: ['Review it and flag problems', 'Give me step-by-step instructions', 'Compare it against alternatives', 'Answer my questions about it'],
+  placeholder: 'e.g. review this plan and tell me what I have missed'
+};
 
 var MAX_QUESTIONS = 4;
+
+/* A pack's askFor entries carry the phrasing used in the final "ask me"
+   list (tag + text); this fills in what is needed to ask it as its own
+   interactive step. */
+function questionFromAskFor(item) {
+  return {
+    key: item.tag,
+    label: item.label || item.text,
+    why: item.why || '',
+    chips: item.chips || [],
+    placeholder: item.placeholder || ''
+  };
+}
+
+/* What gets asked next depends on what the prompt is actually about — this
+   is what makes the questions feel relevant instead of generic. Re-run
+   after the instruction question is answered, since that can change which
+   pack is detected. */
+function buildQueue(session) {
+  var a = session.answers;
+  var queue = [];
+  if (!session.clean.hasInstruction && !a.instruction) queue.push(INSTRUCTION_QUESTION);
+
+  var pack = PF.detectIntent(session.raw + ' ' + (a.instruction || ''));
+  (pack.askFor || []).forEach(function (item) {
+    if (a[item.tag]) return;
+    queue.push(questionFromAskFor(item));
+  });
+  return queue;
+}
 
 /* "give me 20 youtube video ideas" -> "20". Deliberately requires a countable
    noun so "a 500 word article" and "2 week trip" are not mistaken for counts. */
@@ -328,9 +335,7 @@ PF.startImprove = function (text) {
     tone: null
   };
 
-  session.queue = QUESTIONS.filter(function (q) {
-    return !q.askIf || q.askIf(session);
-  }).slice();
+  session.queue = buildQueue(session);
 
   return session;
 };
@@ -353,6 +358,12 @@ PF.answerImprove = function (session, question, answer) {
   if (text) session.answers[question.key] = text;
   session.queue.shift();
   session.askedCount++;
+
+  /* Answering the instruction question can change which pack is detected,
+     so rebuild the remaining queue around the prompt's actual subject
+     instead of sticking with whatever was guessed before it was clarified. */
+  if (question.key === 'instruction' && text) session.queue = buildQueue(session);
+
   if (!session.queue.length || session.askedCount >= session.maxQuestions) session.done = true;
   return session;
 };
@@ -378,8 +389,8 @@ var GENERIC_PACK = {
     'Lead with what matters most rather than working up to it.'
   ],
   askFor: [
-    { tag: 'audience', text: 'who this is for' },
-    { tag: 'goal', text: 'what a good result would look like to me' }
+    { tag: 'audience', text: 'who this is for', label: 'Who is this for?', why: 'Audience changes vocabulary and depth more than any other single detail.', chips: ['Just me', 'A complete beginner', 'My team', 'Customers', 'Technical experts'], placeholder: 'e.g. someone with no technical background' },
+    { tag: 'goal', text: 'what a good result would look like to me', label: 'What would a good result look like to you?', why: 'Without a target, there is no way to tell whether it actually answered you.', placeholder: 'e.g. a clear recommendation with the main reason' }
   ]
 };
 
@@ -396,10 +407,10 @@ PF.INTENT_PACKS = [
       'For your top five, suggest realistic domain options — and state plainly that you cannot verify availability.'
     ],
     askFor: [
-      { tag: 'subject', text: 'what the store actually sells' },
-      { tag: 'audience', text: 'who the target customer is' },
-      { tag: 'tone', text: 'the tone I want (playful, premium, plain, technical)' },
-      { tag: 'avoid', text: 'any words, styles or languages to avoid' }
+      { tag: 'subject', text: 'what the store actually sells', label: 'What does it actually sell?', why: 'A name that fits a specific product feels earned; a name that could fit anything feels generic.', placeholder: 'e.g. handmade eco-friendly candles' },
+      { tag: 'audience', text: 'who the target customer is', label: 'Who is the target customer?', why: 'A name that lands with teenagers rarely lands with professionals.', placeholder: 'e.g. young professionals who care about sustainability' },
+      { tag: 'tone', text: 'the tone I want (playful, premium, plain, technical)', label: 'What tone are you going for?', chips: ['Playful', 'Premium', 'Plain', 'Technical'], why: 'Tone is the single biggest lever on whether a name feels right.' },
+      { tag: 'avoid', text: 'any words, styles or languages to avoid', label: 'Any words, styles or languages to avoid?', placeholder: 'e.g. nothing cutesy, no puns' }
     ]
   },
   {
@@ -413,8 +424,8 @@ PF.INTENT_PACKS = [
       'Skip anything so obvious I have certainly already considered it.'
     ],
     askFor: [
-      { tag: 'situation', text: 'my situation, budget and time constraints' },
-      { tag: 'tried', text: 'what I have already tried or ruled out' }
+      { tag: 'situation', text: 'my situation, budget and time constraints', label: "What's your situation — budget and time?", placeholder: 'e.g. a few hours a week, near-zero budget' },
+      { tag: 'tried', text: 'what I have already tried or ruled out', label: 'What have you already tried or ruled out?', why: 'Stops the list repeating ideas you have already dismissed.' }
     ]
   },
   {
@@ -429,8 +440,8 @@ PF.INTENT_PACKS = [
       'Suggest an aspect ratio and say which tool the phrasing suits.'
     ],
     askFor: [
-      { tag: 'purpose', text: 'what the image is for (logo, hero image, print, thumbnail)' },
-      { tag: 'tone', text: 'the mood or brand feel I am after' }
+      { tag: 'purpose', text: 'what the image is for (logo, hero image, print, thumbnail)', label: 'What is the image for?', chips: ['Logo', 'Hero image', 'Print', 'Thumbnail'], why: 'Changes composition and resolution needs completely.' },
+      { tag: 'tone', text: 'the mood or brand feel I am after', label: 'What mood or brand feel are you after?', placeholder: 'e.g. minimal and calm, or bold and energetic' }
     ]
   },
   {
@@ -444,8 +455,8 @@ PF.INTENT_PACKS = [
       'Where pricing, features or availability may have changed since your training data, say so explicitly rather than stating it as current fact.'
     ],
     askFor: [
-      { tag: 'situation', text: 'my budget and scale' },
-      { tag: 'criteria', text: 'which criteria matter most to me' }
+      { tag: 'situation', text: 'my budget and scale', label: "What's your budget and scale?", placeholder: 'e.g. solo freelancer, under $50/month' },
+      { tag: 'criteria', text: 'which criteria matter most to me', label: 'Which criteria matter most to you?', placeholder: 'e.g. price, ease of use, integrations' }
     ]
   },
   {
@@ -459,9 +470,9 @@ PF.INTENT_PACKS = [
       'Give the corrected code and mark clearly what changed.'
     ],
     askFor: [
-      { tag: 'error', text: 'the exact error message or stack trace' },
-      { tag: 'tried', text: 'what I have already tried' },
-      { tag: 'env', text: 'the language, runtime and versions' }
+      { tag: 'error', text: 'the exact error message or stack trace', label: "What's the exact error message or stack trace?", why: 'The single most useful thing you can paste in — guessing without it wastes a round trip.', placeholder: 'paste the error text here' },
+      { tag: 'tried', text: 'what I have already tried', label: 'What have you already tried?', why: 'Stops it suggesting the same fix twice.' },
+      { tag: 'env', text: 'the language, runtime and versions', label: 'What language, runtime and versions?', placeholder: 'e.g. Node 20, Python 3.11' }
     ]
   },
   {
@@ -475,8 +486,8 @@ PF.INTENT_PACKS = [
       'If there is a significantly simpler approach than the one I described, say so before writing anything.'
     ],
     askFor: [
-      { tag: 'lang', text: 'the language, framework and version' },
-      { tag: 'conventions', text: 'any existing code or conventions to match' }
+      { tag: 'lang', text: 'the language, framework and version', label: 'What language, framework and version?', placeholder: 'e.g. TypeScript, React 18' },
+      { tag: 'conventions', text: 'any existing code or conventions to match', label: 'Any existing code or conventions to match?', placeholder: 'e.g. match the style already used in utils.ts' }
     ]
   },
   {
@@ -491,8 +502,8 @@ PF.INTENT_PACKS = [
       'Keep the change as small as it can be while still being correct.'
     ],
     askFor: [
-      { tag: 'code', text: 'the relevant existing code or file structure' },
-      { tag: 'constraints', text: 'anything I must not break' }
+      { tag: 'code', text: 'the relevant existing code or file structure', label: 'What does the relevant existing code or file structure look like?', why: 'Without this it can only guess at how the change should fit in.' },
+      { tag: 'constraints', text: 'anything I must not break', label: 'Anything that must not break?', placeholder: 'e.g. keep the public API the same' }
     ]
   },
   {
@@ -513,8 +524,8 @@ PF.INTENT_PACKS = [
       'No "in today\'s fast-paced world", no engagement-bait questions, no emoji bullet lists.'
     ],
     askFor: [
-      { tag: 'audience', text: 'who I am trying to reach' },
-      { tag: 'goal', text: 'whether I want clicks, replies or just awareness' }
+      { tag: 'audience', text: 'who I am trying to reach', label: 'Who are you trying to reach?', placeholder: 'e.g. small business owners on LinkedIn' },
+      { tag: 'goal', text: 'whether I want clicks, replies or just awareness', label: 'Are you after clicks, replies or just awareness?', chips: ['Clicks', 'Replies', 'Awareness', 'Shares'] }
     ]
   },
   {
@@ -528,8 +539,27 @@ PF.INTENT_PACKS = [
       'Give me two versions taking different angles, clearly labelled.'
     ],
     askFor: [
-      { tag: 'audience', text: 'who the reader is' },
-      { tag: 'format', text: 'the tone and length I want' }
+      { tag: 'audience', text: 'who the reader is', label: 'Who is the reader?', placeholder: 'e.g. existing customers considering cancelling' },
+      { tag: 'format', text: 'the tone and length I want', label: 'What tone and length do you want?', chips: ['Short and punchy', 'Warm and conversational', 'Formal', 'Detailed'] }
+    ]
+  },
+  {
+    /* plan sits ahead of explain for the same reason social/writing do:
+       "how do i start a shop" is a planning request, but explain's bare
+       "how do" trigger would otherwise claim it first. */
+    id: 'plan',
+    label: 'planning',
+    test: /\b(plan(?:ning)?|roadmap|strategy|steps to|how do i start|set(?:ting)? up|launch(?:ing)?|checklist)\b/i,
+    requirements: [
+      'Give concrete steps in order, with a rough time estimate for each.',
+      'Flag dependencies — what has to happen before what.',
+      'Identify the single most likely point of failure and how to de-risk it.',
+      'Mark anything I could skip or defer if I am short on time or money.'
+    ],
+    askFor: [
+      { tag: 'deadline', text: 'my deadline and budget', label: "What's your deadline and budget?", placeholder: 'e.g. 6 weeks, under $2000' },
+      { tag: 'resources', text: 'what resources, skills or people I have', label: 'What resources, skills or people do you have?' },
+      { tag: 'done', text: 'what I have already done', label: 'What have you already done?', why: 'Stops the plan starting from zero when you are already partway there.' }
     ]
   },
   {
@@ -544,8 +574,8 @@ PF.INTENT_PACKS = [
       'End with three short questions I can answer to check I actually understood it.'
     ],
     askFor: [
-      { tag: 'level', text: 'what I already know about this' },
-      { tag: 'goal', text: 'why I need to know it' }
+      { tag: 'level', text: 'what I already know about this', label: 'What do you already know about this?', chips: ['Nothing at all', 'The basics', 'Some experience', 'Quite a lot'], why: 'Stops it re-explaining things you already know, or skipping things you do not.' },
+      { tag: 'goal', text: 'why I need to know it', label: 'Why do you need to know this?', placeholder: 'e.g. to explain it to my team, to make a decision' }
     ]
   },
   {
@@ -559,8 +589,8 @@ PF.INTENT_PACKS = [
       'If something genuinely works, say so briefly — but do not pad with praise.'
     ],
     askFor: [
-      { tag: 'purpose', text: 'what this is for and who will see it' },
-      { tag: 'worry', text: 'what I am most worried about' }
+      { tag: 'purpose', text: 'what this is for and who will see it', label: 'What is this for, and who will see it?', placeholder: 'e.g. a client pitch deck' },
+      { tag: 'worry', text: 'what I am most worried about', label: 'What are you most worried about?', placeholder: 'e.g. that the argument in section 2 is weak' }
     ]
   },
   {
@@ -574,8 +604,8 @@ PF.INTENT_PACKS = [
       'Note anything left ambiguous or unresolved rather than smoothing over it.'
     ],
     askFor: [
-      { tag: 'source', text: 'the text to summarise' },
-      { tag: 'audience', text: 'who the summary is for' }
+      { tag: 'source', text: 'the text to summarise', label: "What's the text to summarise?", why: 'Paste it in directly — without the source there is nothing to work from.', placeholder: 'paste the text here' },
+      { tag: 'audience', text: 'who the summary is for', label: 'Who is the summary for?', placeholder: 'e.g. my manager, who has no context' }
     ]
   },
   {
@@ -589,25 +619,9 @@ PF.INTENT_PACKS = [
       'If the data is insufficient to answer the question, say so rather than speculating.'
     ],
     askFor: [
-      { tag: 'data', text: 'the data itself' },
-      { tag: 'meaning', text: 'what each column means and the period it covers' },
-      { tag: 'decision', text: 'what decision this informs' }
-    ]
-  },
-  {
-    id: 'plan',
-    label: 'planning',
-    test: /\b(plan(?:ning)?|roadmap|strategy|steps to|how do i start|set(?:ting)? up|launch(?:ing)?|checklist)\b/i,
-    requirements: [
-      'Give concrete steps in order, with a rough time estimate for each.',
-      'Flag dependencies — what has to happen before what.',
-      'Identify the single most likely point of failure and how to de-risk it.',
-      'Mark anything I could skip or defer if I am short on time or money.'
-    ],
-    askFor: [
-      { tag: 'deadline', text: 'my deadline and budget' },
-      { tag: 'resources', text: 'what resources, skills or people I have' },
-      { tag: 'done', text: 'what I have already done' }
+      { tag: 'data', text: 'the data itself', label: "What's the data itself?", why: 'Paste it in or describe its shape, so conclusions are grounded in it rather than guessed.' },
+      { tag: 'meaning', text: 'what each column means and the period it covers', label: 'What does each column mean, and what period does it cover?' },
+      { tag: 'decision', text: 'what decision this informs', label: 'What decision does this inform?', placeholder: 'e.g. whether to renew this contract' }
     ]
   }
 ];
@@ -669,12 +683,11 @@ function taskAndContext(session) {
 /* Drop anything the user has already told us. */
 function openQuestions(pack, session) {
   var a = session.answers;
-  return (pack.askFor || []).filter(function (item) {
-    if (item.tag === 'audience' && a.audience) return false;
-    if (item.tag === 'format' && a.format) return false;
-    if ((item.tag === 'avoid' || item.tag === 'tone') && a.avoid) return false;
-    return true;
-  });
+  return (pack.askFor || []).filter(function (item) { return !a[item.tag]; });
+}
+
+function capitalizeFirst(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 /* A detailed, clearly-worded prompt does not need a list of questions bolted
@@ -709,10 +722,20 @@ function effectiveRequirements(session, pack) {
     }
   }
 
-  if (a.format) reqs.push('Format: ' + a.format + '.');
-  if (a.audience) reqs.push('Audience: ' + a.audience + '.');
+  /* Fold every answered pack question in using the pack's own phrasing, not
+     just the handful of universal tags — a "naming" answer about what the
+     store sells is just as much a real answer as the audience is. */
+  var covered = {};
+  (pack.askFor || []).forEach(function (item) {
+    if (a[item.tag]) {
+      reqs.push(capitalizeFirst(item.text) + ': ' + a[item.tag] + '.');
+      covered[item.tag] = true;
+    }
+  });
+  if (a.format && !covered.format) reqs.push('Format: ' + a.format + '.');
+  if (a.audience && !covered.audience) reqs.push('Audience: ' + a.audience + '.');
   if (session.tone) reqs.push('Tone: ' + session.tone + '.');
-  if (a.avoid) reqs.push('Avoid: ' + a.avoid + '.');
+  if (a.avoid && !covered.avoid) reqs.push('Avoid: ' + a.avoid + '.');
   if (session.lengthPref === 'shorter') reqs.push('Keep it tight — no padding, and no more than a couple of sentences per point.');
   if (session.lengthPref === 'longer') reqs.push('Go into real depth on each point rather than summarising.');
 
@@ -776,6 +799,9 @@ PF.improveReport = function (session) {
   if (a.audience) notes.push('named the audience');
   if (a.format) notes.push('specified the output format');
   if (a.avoid) notes.push('added constraints');
+  var namedTags = { instruction: 1, audience: 1, format: 1, avoid: 1 };
+  var extra = Object.keys(a).filter(function (k) { return !namedTags[k]; }).length;
+  if (extra) notes.push('filled in ' + extra + ' more detail' + (extra > 1 ? 's' : '') + ' it asked for');
 
   return {
     notes: notes,
