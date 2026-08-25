@@ -158,6 +158,26 @@ function splitPivotClauses(text) {
   return text;
 }
 
+/* "I need X. Actually make it Y instead." — a sentence that opens with a
+   correction marker supersedes the one before it, not adds to it. Left
+   alone, both survive into the output and it is unclear which one was
+   actually wanted. */
+var CORRECTION_STARTERS = /^(actually|on second thought|scratch that|wait,?\s*no|no wait|change of plan)\b[,:]?\s*/i;
+
+function dropSupersededSentences(sentences) {
+  var out = [];
+  for (var i = 0; i < sentences.length; i++) {
+    var s = sentences[i];
+    if (CORRECTION_STARTERS.test(s) && out.length) {
+      out.pop();
+      s = s.replace(CORRECTION_STARTERS, '');
+      s = s.charAt(0).toUpperCase() + s.slice(1);
+    }
+    out.push(s);
+  }
+  return out;
+}
+
 /* Full clean: returns the tidied sentences plus what is missing. */
 PF.cleanPrompt = function (raw) {
   var text = String(raw || '').replace(/\s+/g, ' ').trim();
@@ -167,6 +187,7 @@ PF.cleanPrompt = function (raw) {
   var sentences = splitSentences(working)
     .map(function (s, i) { return tidySentence(s, i > 0); })
     .filter(Boolean);
+  sentences = dropSupersededSentences(sentences);
 
   /* detectInstruction only looks at the first 12 words, so a pivot
      instruction split out further down the sentence list can be missed at
@@ -516,7 +537,11 @@ PF.INTENT_PACKS = [
        turn, or "write me an instagram caption" loses to the generic pack. */
     id: 'social',
     label: 'social post',
-    test: /\b(instagram|linkedin|tiktok|twitter|tweet|facebook|threads post|social media|caption|hashtag|reel)\b/i,
+    /* Bare platform names are too broad on their own — "facebook ads" or
+       "twitter API" are not requests to write a post, and were wrongly
+       claiming unrelated business/marketing prompts. Require the platform
+       name to actually be paired with a content word. */
+    test: /\b(instagram|linkedin|tiktok|twitter|facebook|threads)\s+(?:post|caption|story|stories|reel|bio|thread)\b|\b(tweet|hashtag|caption|reel)\b/i,
     requirements: [
       'Match the native conventions, length and rhythm of that platform — not copy that could be pasted anywhere.',
       'The first line has to earn the second. Open with a specific, concrete hook.',
