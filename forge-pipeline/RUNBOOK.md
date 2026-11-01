@@ -10,14 +10,13 @@ Read and write it with the ArtifactData tool. Pin every write to an existing doc
 ## Hard limits
 - At most **2 designs listed** and at most **4 image generations (160 Artlist credits)** per run.
 - Never pay for anything else. If Artlist asks to confirm a cost, stop the run.
-- No brand, character, celebrity, team or trademarked names (see `watchlist.txt`), and never copy other sellers.
+- No brand, character, celebrity, team or trademarked names (see `~/forge-pipeline/watchlist.txt`), and never copy other sellers.
 - If a step fails, log it (step 9) and stop. Never retry Printify publishing more than once.
 
 ## 0. Setup
-The scripts live in `forge-pipeline/` on branch `forge/daily-pipeline`:
-`git fetch origin forge/daily-pipeline && git checkout FETCH_HEAD -- forge-pipeline`
-Run `python3 forge-pipeline/printify.py check`. If it says the token is not set or fails, log
-"FORGE: run skipped, Printify isn't connected (add PRINTIFY_API_TOKEN)" to the feed and stop.
+The scripts and text files come with this run's prompt: write each one into `~/forge-pipeline/` exactly as given
+(this repo copy is the master). Then run `python3 ~/forge-pipeline/printify.py check`. If it says the token is not
+set or fails, log "run skipped, Printify isn't connected (add PRINTIFY_API_TOKEN)" to the feed (step 9) and stop.
 
 ## 1. Read the station
 ArtifactData `list` on: `ideas`, `designs`, `signals`, and `get` on `ops/taste` and `ops/feed`.
@@ -45,17 +44,17 @@ trademarked. If not, regenerate once; if it fails again, drop that idea and take
 Download the PNG from the result's asset URL into the scratchpad.
 
 ## 5. Print file
-`python3 forge-pipeline/make_print.py <png> <scratch dir> <nn-slug>` gives `<nn-slug>-print.png` (3900 px) and
+`python3 ~/forge-pipeline/make_print.py <png> <scratch dir> <nn-slug>` gives `<nn-slug>-print.png` (3900 px) and
 `<nn-slug>-web.webp`.
 
 ## 6. Listing copy
 - title: max 140 characters. Design name first, then 4-5 comma-separated buyer phrases (product, recipient, occasion).
 - tags: exactly 13, lowercase, unique, each max 20 characters.
-- description: 2 warm sentences about the design and who it's for, a blank line, then `disclosure.txt`.
-Check title, tags and description against `watchlist.txt`.
+- description: 2 warm sentences about the design and who it's for, a blank line, then `~/forge-pipeline/disclosure.txt`.
+Check title, tags and description against `~/forge-pipeline/watchlist.txt`.
 
 ## 7. Publish
-`python3 forge-pipeline/printify.py publish --image <print.png> --title "<title>" --tags "<t1,...,t13>" --desc-file <desc.txt>`
+`python3 ~/forge-pipeline/printify.py publish --image <print.png> --title "<title>" --tags "<t1,...,t13>" --desc-file <desc.txt>`
 It copies the template listing's blank, colours, sizes, prices and placement, uploads the art and publishes to Etsy.
 
 ## 8. Update FORGE-OS
@@ -66,6 +65,6 @@ It copies the template listing's blank, colours, sizes, prices and placement, up
 - `delete ideas/<id>` for each idea used; append it to `ops/taste.approved` with `by: "FORGE auto"`.
 
 ## 9. Log
-Prepend one item per design to `ops/feed.items` (keep 60): `{t: <ms>, who: "FORGE", text: "auto-listed '<name>' on Etsy"}`,
+`get ops/feed`, then `set` it with one new item per design prepended to `items` (keep 60, pin `if_version`). Never write to any other collection for logging: `{t: <ms>, who: "FORGE", text: "auto-listed '<name>' on Etsy"}`,
 or on failure `{t, who: "FORGE", text: "<what failed>", warn: true}`.
 End with a 3-line summary: what was listed, credits used, anything that needs the owner.
